@@ -1,6 +1,9 @@
 package nikologs
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 // Level represents a log severity level.
 type Level int
@@ -92,4 +95,63 @@ func WithFileID(id string) LogOption {
 	return func(e *entry) {
 		e.FileID = id
 	}
+}
+
+// Log buffers a log entry at the given level. It is non-blocking.
+// If the client is shut down or the buffer is full, the entry is dropped
+// and the OnError callback is invoked.
+func (c *Client) Log(level Level, msg string, fields Fields, opts ...LogOption) {
+	if c.shutdown {
+		c.onError(ErrShutdown)
+		return
+	}
+	e := &entry{
+		Level:   level,
+		Message: msg,
+		Source:  c.source,
+		Meta:    fields,
+	}
+	for _, opt := range opts {
+		opt(e)
+	}
+	select {
+	case c.entries <- e:
+	default:
+		c.onError(fmt.Errorf("nikologs: buffer full, dropping log: %s", msg))
+	}
+}
+
+// Success logs at LevelSuccess.
+func (c *Client) Success(msg string, fields Fields, opts ...LogOption) {
+	c.Log(LevelSuccess, msg, fields, opts...)
+}
+
+// Trace logs at LevelTrace.
+func (c *Client) Trace(msg string, fields Fields, opts ...LogOption) {
+	c.Log(LevelTrace, msg, fields, opts...)
+}
+
+// Debug logs at LevelDebug.
+func (c *Client) Debug(msg string, fields Fields, opts ...LogOption) {
+	c.Log(LevelDebug, msg, fields, opts...)
+}
+
+// Info logs at LevelInfo.
+func (c *Client) Info(msg string, fields Fields, opts ...LogOption) {
+	c.Log(LevelInfo, msg, fields, opts...)
+}
+
+// Warn logs at LevelWarn.
+func (c *Client) Warn(msg string, fields Fields, opts ...LogOption) {
+	c.Log(LevelWarn, msg, fields, opts...)
+}
+
+// Error logs at LevelError.
+func (c *Client) Error(msg string, fields Fields, opts ...LogOption) {
+	c.Log(LevelError, msg, fields, opts...)
+}
+
+// Fatal logs at LevelFatal.
+func (c *Client) Fatal(msg string, fields Fields, opts ...LogOption) {
+	c.Log(LevelFatal, msg, fields, opts...)
 }

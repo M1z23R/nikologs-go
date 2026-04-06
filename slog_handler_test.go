@@ -49,88 +49,76 @@ func TestSlogHandlerEnabled(t *testing.T) {
 	}
 }
 
+func metaOf(t *testing.T, log map[string]any) map[string]any {
+	t.Helper()
+	m, _ := log["metadata"].(map[string]any)
+	return m
+}
+
 func TestSlogHandlerHandle(t *testing.T) {
-	c := New("nk_test", WithSource("slog-test"), WithFlushInterval(time.Hour))
+	c, cap := newCapture(t, WithSource("slog-test"))
 	defer c.Shutdown(t.Context())
 
-	h := NewSlogHandler(c, nil)
-	logger := slog.New(h)
-
+	logger := slog.New(NewSlogHandler(c, nil))
 	logger.Info("hello", "method", "GET", "status", 200)
 
-	select {
-	case e := <-c.entries:
-		if e.Level != LevelInfo {
-			t.Errorf("level = %v, want Info", e.Level)
-		}
-		if e.Message != "hello" {
-			t.Errorf("message = %q", e.Message)
-		}
-		if e.Meta["method"] != "GET" {
-			t.Errorf("meta[method] = %v", e.Meta["method"])
-		}
-		if e.Meta["status"] != 200 {
-			t.Errorf("meta[status] = %v", e.Meta["status"])
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for entry")
+	logs := cap.waitFor(t, 1, 2*time.Second)
+	if logs[0]["level"] != "info" {
+		t.Errorf("level = %v", logs[0]["level"])
+	}
+	if logs[0]["message"] != "hello" {
+		t.Errorf("message = %v", logs[0]["message"])
+	}
+	meta := metaOf(t, logs[0])
+	if meta["method"] != "GET" {
+		t.Errorf("meta[method] = %v", meta["method"])
+	}
+	// JSON unmarshals numbers as float64
+	if meta["status"] != float64(200) {
+		t.Errorf("meta[status] = %v (%T)", meta["status"], meta["status"])
 	}
 }
 
 func TestSlogHandlerWithGroup(t *testing.T) {
-	c := New("nk_test", WithFlushInterval(time.Hour))
+	c, cap := newCapture(t)
 	defer c.Shutdown(t.Context())
 
-	h := NewSlogHandler(c, nil)
-	logger := slog.New(h).WithGroup("http")
-
+	logger := slog.New(NewSlogHandler(c, nil)).WithGroup("http")
 	logger.Info("request", "status", 200)
 
-	select {
-	case e := <-c.entries:
-		if e.Meta["http.status"] != 200 {
-			t.Errorf("expected http.status=200, got meta=%v", e.Meta)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out")
+	logs := cap.waitFor(t, 1, 2*time.Second)
+	meta := metaOf(t, logs[0])
+	if meta["http.status"] != float64(200) {
+		t.Errorf("expected http.status=200, got meta=%v", meta)
 	}
 }
 
 func TestSlogHandlerWithAttrs(t *testing.T) {
-	c := New("nk_test", WithFlushInterval(time.Hour))
+	c, cap := newCapture(t)
 	defer c.Shutdown(t.Context())
 
 	h := NewSlogHandler(c, nil)
 	logger := slog.New(h.WithAttrs([]slog.Attr{slog.String("service", "api")}))
-
 	logger.Info("req")
 
-	select {
-	case e := <-c.entries:
-		if e.Meta["service"] != "api" {
-			t.Errorf("expected service=api, got meta=%v", e.Meta)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out")
+	logs := cap.waitFor(t, 1, 2*time.Second)
+	meta := metaOf(t, logs[0])
+	if meta["service"] != "api" {
+		t.Errorf("expected service=api, got meta=%v", meta)
 	}
 }
 
 func TestSlogHandlerNestedGroups(t *testing.T) {
-	c := New("nk_test", WithFlushInterval(time.Hour))
+	c, cap := newCapture(t)
 	defer c.Shutdown(t.Context())
 
-	h := NewSlogHandler(c, nil)
-	logger := slog.New(h).WithGroup("a").WithGroup("b")
-
+	logger := slog.New(NewSlogHandler(c, nil)).WithGroup("a").WithGroup("b")
 	logger.Info("nested", "key", "val")
 
-	select {
-	case e := <-c.entries:
-		if e.Meta["a.b.key"] != "val" {
-			t.Errorf("expected a.b.key=val, got meta=%v", e.Meta)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out")
+	logs := cap.waitFor(t, 1, 2*time.Second)
+	meta := metaOf(t, logs[0])
+	if meta["a.b.key"] != "val" {
+		t.Errorf("expected a.b.key=val, got meta=%v", meta)
 	}
 }
 

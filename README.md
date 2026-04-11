@@ -19,6 +19,18 @@ Requires Go 1.21+.
 
 ## Quick Start
 
+Declare the client once as `nlog` and pass it into your services. `nlog` is the
+recommended name throughout your codebase — short, unambiguous, and reads
+naturally at call sites like `nlog.Info(...)` and `nlog.Error(...)`.
+
+> **Fire-and-forget.** `nlog.Info`, `nlog.Warn`, `nlog.Error`, etc. are
+> non-blocking: they allocate an entry and do a non-blocking send onto an
+> in-memory buffer, then return. All batching, HTTP, and retries happen on a
+> background goroutine started by `nikologs.New`. You can call them directly
+> from request hot paths — **no need to wrap them in `go func() { ... }()`**.
+> If the buffer fills (service down, sustained burst), logs are dropped and
+> the `WithOnError` callback fires; your app never blocks.
+
 ```go
 package main
 
@@ -30,17 +42,54 @@ import (
 )
 
 func main() {
-    client := nikologs.New("nk_your_api_key",
+    nlog := nikologs.New("nk_your_api_key",
         nikologs.WithSource("my-service"),
-        nikologs.WithFlushInterval(3 * time.Second),
+        nikologs.WithFlushInterval(3*time.Second),
         nikologs.WithBatchSize(200),
     )
-    defer client.Shutdown(context.Background())
+    defer nlog.Shutdown(context.Background())
 
-    client.Info("service started", nikologs.Fields{"version": "1.0.0"})
-    client.Error("something broke", nikologs.Fields{"code": 500})
+    nlog.Info("service started", nikologs.Fields{"version": "1.0.0"})
+
+    svc := NewUserService(nlog)
+    svc.SignIn("u-123")
 }
 ```
+
+## Passing `nlog` to Services
+
+Services and handlers accept `*nikologs.Client` as a dependency. Store it on the
+struct as `nlog` and call `nlog.Warn`, `nlog.Error`, etc. directly.
+
+```go
+type UserService struct {
+    nlog *nikologs.Client
+    // ...other dependencies
+}
+
+func NewUserService(nlog *nikologs.Client) *UserService {
+    return &UserService{nlog: nlog}
+}
+
+func (s *UserService) SignIn(userID string) error {
+    s.nlog.Info("sign-in attempt", nikologs.Fields{"user_id": userID})
+
+    if err := s.verify(userID); err != nil {
+        s.nlog.Error("sign-in failed", nikologs.Fields{
+            "user_id": userID,
+            "error":   err.Error(),
+        })
+        return err
+    }
+
+    s.nlog.Success("sign-in ok", nikologs.Fields{"user_id": userID})
+    return nil
+}
+```
+
+The same pattern works for HTTP handlers, background workers, or any other
+component — construct `nlog` once in `main`, then inject it wherever logging
+is needed.
 
 ## Configuration
 
@@ -57,22 +106,22 @@ func main() {
 ## Log Levels
 
 ```go
-client.Success("done", nil)
-client.Trace("detailed", nil)
-client.Debug("debug info", nil)
-client.Info("informational", nil)
-client.Warn("warning", nil)
-client.Error("error occurred", nil)
-client.Fatal("fatal error", nil)
+nlog.Success("done", nil)
+nlog.Trace("detailed", nil)
+nlog.Debug("debug info", nil)
+nlog.Info("informational", nil)
+nlog.Warn("warning", nil)
+nlog.Error("error occurred", nil)
+nlog.Fatal("fatal error", nil)
 
 // Or use the generic method:
-client.Log(nikologs.LevelInfo, "msg", fields)
+nlog.Log(nikologs.LevelInfo, "msg", fields)
 ```
 
 ### Per-Entry Options
 
 ```go
-client.Info("deployed", nil,
+nlog.Info("deployed", nil,
     nikologs.WithTimestamp(time.Now()),
     nikologs.WithImageID("uuid"),
     nikologs.WithFileID("uuid"),
@@ -81,8 +130,15 @@ client.Info("deployed", nil,
 
 ## slog Integration
 
+If you prefer Go's standard `log/slog`, wrap `nlog` in a `slog.Handler`:
+
 ```go
-handler := nikologs.NewSlogHandler(client, &nikologs.SlogHandlerOptions{
+nlog := nikologs.New("nk_your_api_key",
+    nikologs.WithSource("my-service"),
+)
+defer nlog.Shutdown(context.Background())
+
+handler := nikologs.NewSlogHandler(nlog, &nikologs.SlogHandlerOptions{
     Level: slog.LevelInfo,
 })
 logger := slog.New(handler)
@@ -96,19 +152,19 @@ slog levels map to nikologs levels: Debug → debug, Info → info, Warn → war
 Upload images or files and reference them in log entries:
 
 ```go
-client := nikologs.New("nk_your_api_key",
+nlog := nikologs.New("nk_your_api_key",
     nikologs.WithUploadKey("nku_your_upload_key"),
 )
 
 file, _ := os.Open("screenshot.png")
 defer file.Close()
 
-resp, err := client.UploadAttachment(context.Background(), file, "screenshot.png")
+resp, err := nlog.UploadAttachment(context.Background(), file, "screenshot.png")
 if err != nil {
     log.Fatal(err)
 }
 
-client.Error("UI bug", nil, nikologs.WithImageID(resp.ID))
+nlog.Error("UI bug", nil, nikologs.WithImageID(resp.ID))
 ```
 
 ## License

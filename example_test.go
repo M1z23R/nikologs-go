@@ -92,6 +92,19 @@ func ExampleNewSlogHandler() {
 	// Output:
 }
 
+func ExampleNewSlogHandler_tags() {
+	nlog := nikologs.New("nk_your_api_key")
+	defer nlog.Shutdown(context.Background())
+
+	logger := slog.New(nikologs.NewSlogHandler(nlog, nil))
+
+	// The reserved "tags" attr becomes the entry's tags, not metadata.
+	logger.Error("charge failed",
+		slog.Any("tags", []string{"payment", "stripe"}),
+		slog.Int("amount", 4200))
+	// Output:
+}
+
 func ExampleWithOnError() {
 	nlog := nikologs.New("nk_your_api_key",
 		nikologs.WithOnError(func(err error) {

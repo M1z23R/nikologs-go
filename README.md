@@ -168,6 +168,24 @@ logger.Info("request handled", "method", "GET", "status", 200)
 
 slog levels map to nikologs levels: Debug → debug, Info → info, Warn → warn, Error → error. Levels below Debug map to trace.
 
+### Tagging via slog
+
+A reserved `tags` attr is routed into the entry's tags instead of metadata, so
+you can tag logs with plain `slog` calls. The value may be a `[]string`, a
+`[]any` of strings, or a single string:
+
+```go
+logger.Error("charge failed", slog.Any("tags", []string{"payment", "stripe"}))
+
+// Pre-set tags on a sub-logger:
+paymentLog := logger.With(slog.Any("tags", []string{"payment"}))
+paymentLog.Info("captured")
+```
+
+Only the top-level `tags` key is special — a `tags` attr under a `WithGroup`
+prefix stays in metadata. Override the reserved key with
+`SlogHandlerOptions{TagsKey: "..."}`.
+
 ## Attachment Uploads
 
 Upload images or files and reference them in log entries:

@@ -5,29 +5,45 @@ import (
 	"log/slog"
 )
 
+// defaultTagsKey is the attr key that routes into a log entry's tags
+// instead of its metadata.
+const defaultTagsKey = "tags"
+
 // SlogHandlerOptions configures the slog handler.
 type SlogHandlerOptions struct {
 	// Level is the minimum slog level that will be forwarded to nikologs.
 	// Defaults to slog.LevelInfo if nil/zero.
 	Level slog.Leveler
+	// TagsKey is the top-level attr key whose value becomes the entry's
+	// tags rather than metadata. Defaults to "tags". The value may be a
+	// []string, []any of strings, or a single string. Only recognized at
+	// the top level — a key under a WithGroup prefix stays in metadata.
+	TagsKey string
 }
 
 // slogHandler implements slog.Handler, forwarding records to a nikologs Client.
 type slogHandler struct {
-	client *Client
-	level  slog.Leveler
-	group  string // dot-separated group prefix
-	attrs  []slog.Attr
+	client  *Client
+	level   slog.Leveler
+	group   string // dot-separated group prefix
+	attrs   []slog.Attr
+	tagsKey string
 }
 
 // NewSlogHandler returns an slog.Handler that forwards log records to the given Client.
 func NewSlogHandler(client *Client, opts *SlogHandlerOptions) slog.Handler {
 	h := &slogHandler{
-		client: client,
-		level:  slog.LevelInfo,
+		client:  client,
+		level:   slog.LevelInfo,
+		tagsKey: defaultTagsKey,
 	}
-	if opts != nil && opts.Level != nil {
-		h.level = opts.Level
+	if opts != nil {
+		if opts.Level != nil {
+			h.level = opts.Level
+		}
+		if opts.TagsKey != "" {
+			h.tagsKey = opts.TagsKey
+		}
 	}
 	return h
 }
@@ -40,15 +56,26 @@ func (h *slogHandler) Enabled(_ context.Context, level slog.Level) bool {
 // Handle converts the slog.Record to a nikologs entry and buffers it.
 func (h *slogHandler) Handle(_ context.Context, r slog.Record) error {
 	fields := make(Fields)
+	var tags []string
+
+	collect := func(a slog.Attr) {
+		if h.group == "" && a.Key == h.tagsKey {
+			if t := attrToTags(a.Value); t != nil {
+				tags = append(tags, t...)
+				return
+			}
+		}
+		h.addAttr(fields, h.group, a)
+	}
 
 	// Add pre-set attrs
 	for _, a := range h.attrs {
-		h.addAttr(fields, h.group, a)
+		collect(a)
 	}
 
 	// Add record attrs
 	r.Attrs(func(a slog.Attr) bool {
-		h.addAttr(fields, h.group, a)
+		collect(a)
 		return true
 	})
 
@@ -57,7 +84,12 @@ func (h *slogHandler) Handle(_ context.Context, r slog.Record) error {
 		meta = fields
 	}
 
-	h.client.Log(h.mapLevel(r.Level), r.Message, meta)
+	var opts []LogOption
+	if len(tags) > 0 {
+		opts = append(opts, WithTags(tags...))
+	}
+
+	h.client.Log(h.mapLevel(r.Level), r.Message, meta, opts...)
 	return nil
 }
 
@@ -67,10 +99,11 @@ func (h *slogHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	copy(newAttrs, h.attrs)
 	copy(newAttrs[len(h.attrs):], attrs)
 	return &slogHandler{
-		client: h.client,
-		level:  h.level,
-		group:  h.group,
-		attrs:  newAttrs,
+		client:  h.client,
+		level:   h.level,
+		group:   h.group,
+		attrs:   newAttrs,
+		tagsKey: h.tagsKey,
 	}
 }
 
@@ -81,11 +114,40 @@ func (h *slogHandler) WithGroup(name string) slog.Handler {
 		newGroup = h.group + "." + name
 	}
 	return &slogHandler{
-		client: h.client,
-		level:  h.level,
-		group:  newGroup,
-		attrs:  h.attrs,
+		client:  h.client,
+		level:   h.level,
+		group:   newGroup,
+		attrs:   h.attrs,
+		tagsKey: h.tagsKey,
 	}
+}
+
+// attrToTags converts a reserved tags attr value to a slice of tag strings.
+// It accepts a []string, a []any of strings, or a single string. Any other
+// kind returns nil, signaling the attr should be treated as normal metadata.
+func attrToTags(v slog.Value) []string {
+	v = v.Resolve()
+	switch v.Kind() {
+	case slog.KindString:
+		if s := v.String(); s != "" {
+			return []string{s}
+		}
+		return nil
+	case slog.KindAny:
+		switch t := v.Any().(type) {
+		case []string:
+			return t
+		case []any:
+			out := make([]string, 0, len(t))
+			for _, e := range t {
+				if s, ok := e.(string); ok {
+					out = append(out, s)
+				}
+			}
+			return out
+		}
+	}
+	return nil
 }
 
 // mapLevel converts a slog.Level to a nikologs Level.

@@ -122,6 +122,73 @@ func TestSlogHandlerNestedGroups(t *testing.T) {
 	}
 }
 
+func TestAttrToTags(t *testing.T) {
+	tests := []struct {
+		name string
+		val  slog.Value
+		want []string
+	}{
+		{"string slice", slog.AnyValue([]string{"a", "b"}), []string{"a", "b"}},
+		{"any slice of strings", slog.AnyValue([]any{"a", "b"}), []string{"a", "b"}},
+		{"any slice mixed", slog.AnyValue([]any{"a", 1, "b"}), []string{"a", "b"}},
+		{"single string", slog.StringValue("solo"), []string{"solo"}},
+		{"empty string", slog.StringValue(""), nil},
+		{"non-tag int", slog.IntValue(42), nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := attrToTags(tt.val)
+			if len(got) != len(tt.want) {
+				t.Fatalf("attrToTags = %v, want %v", got, tt.want)
+			}
+			for i := range tt.want {
+				if got[i] != tt.want[i] {
+					t.Errorf("attrToTags[%d] = %q, want %q", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestSlogHandlerTagsBridge(t *testing.T) {
+	c, cap := newCapture(t)
+	defer c.Shutdown(t.Context())
+
+	logger := slog.New(NewSlogHandler(c, nil))
+	logger.Info("tagged", slog.Any("tags", []string{"prod", "api"}), "k", "v")
+
+	logs := cap.waitFor(t, 1, 2*time.Second)
+	tags, _ := logs[0]["tags"].([]any)
+	if len(tags) != 2 || tags[0] != "prod" || tags[1] != "api" {
+		t.Errorf("tags = %v, want [prod api]", logs[0]["tags"])
+	}
+	// The reserved key must not leak into metadata.
+	meta := metaOf(t, logs[0])
+	if _, ok := meta["tags"]; ok {
+		t.Error("tags should not appear in metadata")
+	}
+	if meta["k"] != "v" {
+		t.Errorf("meta[k] = %v, want v", meta["k"])
+	}
+}
+
+func TestSlogHandlerTagsGroupedStaysMetadata(t *testing.T) {
+	c, cap := newCapture(t)
+	defer c.Shutdown(t.Context())
+
+	logger := slog.New(NewSlogHandler(c, nil)).WithGroup("http")
+	logger.Info("req", slog.Any("tags", []string{"x"}))
+
+	logs := cap.waitFor(t, 1, 2*time.Second)
+	if _, ok := logs[0]["tags"]; ok {
+		t.Error("grouped tags key should not become entry tags")
+	}
+	meta := metaOf(t, logs[0])
+	if _, ok := meta["http.tags"]; !ok {
+		t.Errorf("expected http.tags in metadata, got %v", meta)
+	}
+}
+
 func TestSlogHandlerFiltersBelowLevel(t *testing.T) {
 	c := New("nk_test", WithFlushInterval(time.Hour))
 	defer c.Shutdown(t.Context())

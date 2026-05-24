@@ -102,6 +102,15 @@ logger := slog.New(handler)
 Mapping: `slog.Debug→debug`, `Info→info`, `Warn→warn`, `Error→error`, below
 Debug → `trace`.
 
+A reserved top-level `tags` attr routes into the entry's tags instead of
+metadata. Value may be `[]string`, `[]any` of strings, or a single string.
+Override the key with `SlogHandlerOptions{TagsKey: "..."}`; a `tags` attr under
+a `WithGroup` prefix stays in metadata.
+
+```go
+logger.Error("charge failed", slog.Any("tags", []string{"payment", "stripe"}))
+```
+
 ## Attachments
 
 Requires `WithUploadKey`. Upload, then reference the returned ID.

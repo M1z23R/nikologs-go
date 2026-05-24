@@ -51,18 +51,32 @@ func TestLogOptionFileID(t *testing.T) {
 	}
 }
 
+func TestLogOptionTags(t *testing.T) {
+	e := &entry{}
+	WithTags("a", "b")(e)
+	WithTags("c")(e)
+	if got := e.Tags; len(got) != 3 || got[0] != "a" || got[1] != "b" || got[2] != "c" {
+		t.Errorf("WithTags = %v, want [a b c]", got)
+	}
+}
+
 func TestEntryMarshal(t *testing.T) {
 	ts := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	e := &entry{
 		Level:   LevelInfo,
 		Message: "hello",
 		Source:  "svc",
+		Tags:    []string{"prod", "api"},
 		Meta:    Fields{"k": "v"},
 	}
 	WithTimestamp(ts)(e)
 	WithImageID("img-1")(e)
 
 	m := e.toPayload()
+	tags, ok := m["tags"].([]string)
+	if !ok || len(tags) != 2 || tags[0] != "prod" || tags[1] != "api" {
+		t.Errorf("tags = %v, want [prod api]", m["tags"])
+	}
 	if m["level"] != "info" {
 		t.Errorf("level = %v, want info", m["level"])
 	}
@@ -93,7 +107,7 @@ func TestEntryMarshalOmitsEmptyOptionals(t *testing.T) {
 		Message: "bare",
 	}
 	m := e.toPayload()
-	for _, key := range []string{"source", "metadata", "timestamp", "image_id", "file_id"} {
+	for _, key := range []string{"source", "tags", "metadata", "timestamp", "image_id", "file_id"} {
 		if _, ok := m[key]; ok {
 			t.Errorf("expected %q to be omitted for bare entry", key)
 		}

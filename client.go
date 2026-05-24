@@ -18,6 +18,7 @@ type Client struct {
 	apiKey        string
 	uploadKey     string
 	source        string
+	defaultTags   []string
 	flushInterval time.Duration
 	batchSize     int
 	httpClient    *http.Client
@@ -77,6 +78,15 @@ func WithBaseURL(url string) Option {
 func WithSource(source string) Option {
 	return func(c *Client) {
 		c.source = source
+	}
+}
+
+// WithDefaultTags sets tags applied to every log entry. Per-call tags
+// supplied via WithTags are appended on top. Server-side normalization
+// lowercases, trims, and dedupes; the cap is 20 unique tags per entry.
+func WithDefaultTags(tags ...string) Option {
+	return func(c *Client) {
+		c.defaultTags = append(c.defaultTags, tags...)
 	}
 }
 

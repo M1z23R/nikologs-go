@@ -47,6 +47,19 @@ func ExampleClient_Log() {
 	// Output:
 }
 
+func ExampleClient_tags() {
+	nlog := nikologs.New("nk_your_api_key",
+		nikologs.WithSource("my-service"),
+		nikologs.WithDefaultTags("env:prod", "region:eu"),
+	)
+	defer nlog.Shutdown(context.Background())
+
+	// Sent with tags: ["env:prod", "region:eu", "payment", "stripe"]
+	nlog.Error("charge failed", nikologs.Fields{"amount": 4200},
+		nikologs.WithTags("payment", "stripe"))
+	// Output:
+}
+
 func ExampleClient_UploadAttachment() {
 	nlog := nikologs.New("nk_your_api_key",
 		nikologs.WithUploadKey("nku_your_upload_key"),

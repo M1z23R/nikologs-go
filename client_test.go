@@ -133,6 +133,38 @@ func TestLogAllLevels(t *testing.T) {
 	}
 }
 
+func TestDefaultTagsMergeWithPerCallTags(t *testing.T) {
+	c, cap := newCapture(t, WithDefaultTags("env:prod", "svc:api"))
+	defer c.Shutdown(t.Context())
+
+	c.Info("with extras", nil, WithTags("payment", "stripe"))
+	c.Info("defaults only", nil)
+
+	logs := cap.waitFor(t, 2, 2*time.Second)
+
+	got0, _ := logs[0]["tags"].([]any)
+	want0 := []string{"env:prod", "svc:api", "payment", "stripe"}
+	if len(got0) != len(want0) {
+		t.Fatalf("entry 0 tags len = %d, want %d (got %v)", len(got0), len(want0), got0)
+	}
+	for i, w := range want0 {
+		if got0[i] != w {
+			t.Errorf("entry 0 tag[%d] = %v, want %q", i, got0[i], w)
+		}
+	}
+
+	got1, _ := logs[1]["tags"].([]any)
+	want1 := []string{"env:prod", "svc:api"}
+	if len(got1) != len(want1) {
+		t.Fatalf("entry 1 tags len = %d, want %d (got %v)", len(got1), len(want1), got1)
+	}
+	for i, w := range want1 {
+		if got1[i] != w {
+			t.Errorf("entry 1 tag[%d] = %v, want %q", i, got1[i], w)
+		}
+	}
+}
+
 func TestLogOnShutdownClient(t *testing.T) {
 	var gotErr error
 	c := New("nk_test", WithOnError(func(err error) { gotErr = err }), WithFlushInterval(time.Hour))

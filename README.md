@@ -97,6 +97,7 @@ is needed.
 |--------|---------|-------------|
 | `WithBaseURL(url)` | `https://nikologs.dimitrije.dev` | API base URL |
 | `WithSource(s)` | `""` | Default source for all log entries |
+| `WithDefaultTags(tags...)` | `nil` | Tags applied to every log entry |
 | `WithFlushInterval(d)` | `5s` | How often the buffer is flushed |
 | `WithBatchSize(n)` | `100` | Max entries per flush (API max: 1000) |
 | `WithHTTPClient(c)` | `http.DefaultClient` | Custom HTTP client |
@@ -125,7 +126,27 @@ nlog.Info("deployed", nil,
     nikologs.WithTimestamp(time.Now()),
     nikologs.WithImageID("uuid"),
     nikologs.WithFileID("uuid"),
+    nikologs.WithTags("deploy", "release"),
 )
+```
+
+## Tags
+
+Tags are short labels attached to a log entry. They're useful for filtering and
+grouping logs in the read API (`?tags=prod,api`, OR semantics).
+
+Set tags that apply to every entry with `WithDefaultTags`, and add per-entry tags
+with the `WithTags` log option. Both are combined; the server lowercases, trims,
+and dedupes them, allowing up to 20 unique tags per entry (128 chars each).
+
+```go
+nlog := nikologs.New("nk_your_api_key",
+    nikologs.WithSource("my-service"),
+    nikologs.WithDefaultTags("env:prod", "region:eu"),
+)
+
+// Sent with tags: ["env:prod", "region:eu", "payment", "stripe"]
+nlog.Error("charge failed", nil, nikologs.WithTags("payment", "stripe"))
 ```
 
 ## slog Integration

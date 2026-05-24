@@ -59,7 +59,21 @@ Levels: `Success`, `Trace`, `Debug`, `Info`, `Warn`, `Error`, `Fatal`
 
 `Fields` is `map[string]any`. Values must be JSON-serializable.
 
-Per-entry options: `WithTimestamp(t)`, `WithImageID(id)`, `WithFileID(id)`.
+Per-entry options: `WithTimestamp(t)`, `WithImageID(id)`, `WithFileID(id)`,
+`WithTags(tags...)`.
+
+## Tags
+
+Tags are labels for filtering/grouping logs in the read API. Set cross-cutting
+tags once via `WithDefaultTags(...)` on `New`; add per-entry tags via the
+`WithTags(...)` log option. Both are combined and sent. The server lowercases,
+trims, and dedupes; max 20 unique tags per entry, 128 chars each.
+
+```go
+nlog := nikologs.New("nk_...", nikologs.WithDefaultTags("env:prod"))
+nlog.Error("charge failed", nil, nikologs.WithTags("payment", "stripe"))
+// -> tags: ["env:prod", "payment", "stripe"]
+```
 
 ## Client options (for `nikologs.New`)
 
@@ -67,6 +81,7 @@ Per-entry options: `WithTimestamp(t)`, `WithImageID(id)`, `WithFileID(id)`.
 |---|---|---|
 | `WithBaseURL(url)` | `https://nikologs.dimitrije.dev` | Override for self-hosted |
 | `WithSource(s)` | `""` | Tags every entry with a source name |
+| `WithDefaultTags(tags...)` | `nil` | Tags applied to every entry; merged with per-call `WithTags` |
 | `WithFlushInterval(d)` | `5s` | |
 | `WithBatchSize(n)` | `100` | API max: 1000 |
 | `WithHTTPClient(c)` | `http.DefaultClient` | |

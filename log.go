@@ -43,6 +43,7 @@ type entry struct {
 	Level     Level
 	Message   string
 	Source    string
+	Tags      []string
 	Meta      Fields
 	Timestamp *time.Time
 	ImageID   string
@@ -57,6 +58,9 @@ func (e *entry) toPayload() map[string]any {
 	}
 	if e.Source != "" {
 		m["source"] = e.Source
+	}
+	if len(e.Tags) > 0 {
+		m["tags"] = e.Tags
 	}
 	if e.Meta != nil && len(e.Meta) > 0 {
 		m["metadata"] = e.Meta
@@ -97,6 +101,16 @@ func WithFileID(id string) LogOption {
 	}
 }
 
+// WithTags appends tags to a log entry. Tags are server-normalized
+// (lowercased, trimmed, deduped) and limited to 20 unique tags per
+// entry, 128 characters each. Can be combined with WithDefaultTags;
+// per-entry tags are appended after the client defaults.
+func WithTags(tags ...string) LogOption {
+	return func(e *entry) {
+		e.Tags = append(e.Tags, tags...)
+	}
+}
+
 // Log buffers a log entry at the given level. It is non-blocking.
 // If the client is shut down or the buffer is full, the entry is dropped
 // and the OnError callback is invoked.
@@ -110,6 +124,9 @@ func (c *Client) Log(level Level, msg string, fields Fields, opts ...LogOption) 
 		Message: msg,
 		Source:  c.source,
 		Meta:    fields,
+	}
+	if len(c.defaultTags) > 0 {
+		e.Tags = append(e.Tags, c.defaultTags...)
 	}
 	for _, opt := range opts {
 		opt(e)
